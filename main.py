@@ -4,116 +4,115 @@ from fastapi import FastAPI, Request, Response
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from dotenv import load_dotenv
-import uvicorn
 
-# =========================
-# Load Environment
-# =========================
+# ===== تحميل متغيرات البيئة =====
 load_dotenv()
 
+app = FastAPI()
+
+# ===== مفاتيح Twilio =====
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
+
+twilio_client = Client(
+    TWILIO_ACCOUNT_SID,
+    TWILIO_AUTH_TOKEN
+)
+
+# ===== Gemini =====
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Twilio Client (للإرسال)
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-# FastAPI
-app = FastAPI()
-
-# =========================
-# Gemini Setup
-# =========================
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-1.5-flash:generateContent"
 )
 
-SYSTEM_PROMPT = "أنت مساعد واتساب ذكي، مختصر، واضح، وترد بالعربية."
+SYSTEM_PROMPT = """
+أنت موظف خدمة عملاء محترف.
+ترد بطريقة ودودة، مختصرة، واضحة.
+إذا كان السؤال غير واضح اطلب التوضيح.
+"""
 
-def gemini_reply(user_message: str) -> str:
 
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": f"{SYSTEM_PROMPT}\n\n{user_message}"
-            }]
-        }]
-    }
+# ===== AI Reply =====
+def ai_reply(user_message):
 
     try:
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": SYSTEM_PROMPT + "\n" + user_message
+                }]
+            }]
+        }
+
         response = requests.post(
             f"{GEMINI_URL}?key={GEMINI_API_KEY}",
             json=payload,
-            timeout=20
+            timeout=10
         )
 
         if response.status_code == 200:
             return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-    except Exception as e:
-        print("Gemini Error:", e)
+        return "حصل خطأ مؤقت."
 
-    return "⚠️ حدث خطأ مؤقت"
+    except Exception:
+        return "تعذر معالجة الطلب حالياً."
 
-# =========================
-# WhatsApp Webhook (استقبال)
-# =========================
-@app.post("/whatsapp")
-async def whatsapp_webhook(request: Request):
+
+# ===== إرسال رسالة مباشرة (اختياري مستقبلاً) =====
+def send_whatsapp_message(to_number, message):
+
+    twilio_client.messages.create(
+        from_=TWILIO_WHATSAPP_NUMBER,
+        body=message,
+        to=to_number
+    )
+
+
+# ===== Webhook الرد التلقائي =====
+@app.api_route("/whatsapp", methods=["GET", "POST"])
+async def whatsapp_auto_reply(request: Request):
 
     form_data = await request.form()
     incoming_msg = form_data.get("Body", "")
 
-    twilio_response = MessagingResponse()
-    msg = twilio_response.message()
+    if not incoming_msg:
+        reply_text = "كيف أقدر أساعدك؟"
+    else:
+        reply_text = ai_reply(incoming_msg)
 
-    reply = gemini_reply(incoming_msg)
-    msg.body(reply)
+    twilio_response = MessagingResponse()
+    twilio_response.message(reply_text)
 
     return Response(
         content=str(twilio_response),
         media_type="application/xml"
     )
 
-# =========================
-# إرسال رسالة واتساب
-# =========================
-@app.post("/send")
-async def send_whatsapp_message(data: dict):
 
-    to_number = data.get("to")
-    message = data.get("message")
-
-    sent = twilio_client.messages.create(
-        from_=TWILIO_WHATSAPP_NUMBER,
-        to=to_number,
-        body=message
-    )
-
-    return {
-        "status": "sent",
-        "sid": sent.sid
-    }
-
-# =========================
-# Health Check
-# =========================
+# ===== Route اختبار =====
 @app.get("/")
-def health():
-    return {"status": "running"}
+def home():
+    return {"status": "WhatsApp Bot Running 🚀"}
 
-# =========================
-# Main Function
-# =========================
+
+# ===== دالة التشغيل MAIN =====
 def main():
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=True
     )
 
+
+# ===== تشغيل مباشر =====
 if __name__ == "__main__":
     main()
