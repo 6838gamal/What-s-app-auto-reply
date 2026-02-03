@@ -22,7 +22,6 @@ twilio_client = Client(
 
 # ===== Gemini =====
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-1.5-flash:generateContent"
@@ -35,9 +34,8 @@ SYSTEM_PROMPT = """
 """
 
 
-# ===== AI Reply =====
+# ===== دالة الذكاء الاصطناعي =====
 def ai_reply(user_message):
-
     try:
         payload = {
             "contents": [{
@@ -56,7 +54,7 @@ def ai_reply(user_message):
         if response.status_code == 200:
             return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-        return "حصل خطأ مؤقت."
+        return "حدث خطأ مؤقت."
 
     except Exception:
         return "تعذر معالجة الطلب حالياً."
@@ -64,7 +62,6 @@ def ai_reply(user_message):
 
 # ===== إرسال رسالة مباشرة (اختياري مستقبلاً) =====
 def send_whatsapp_message(to_number, message):
-
     twilio_client.messages.create(
         from_=TWILIO_WHATSAPP_NUMBER,
         body=message,
@@ -75,7 +72,6 @@ def send_whatsapp_message(to_number, message):
 # ===== Webhook الرد التلقائي =====
 @app.api_route("/whatsapp", methods=["GET", "POST"])
 async def whatsapp_auto_reply(request: Request):
-
     form_data = await request.form()
     incoming_msg = form_data.get("Body", "")
 
@@ -93,6 +89,26 @@ async def whatsapp_auto_reply(request: Request):
     )
 
 
+# ===== Status Callback URL =====
+@app.api_route("/status", methods=["GET", "POST"])
+async def message_status(request: Request):
+
+    if request.method == "POST":
+        data = await request.form()
+    else:
+        data = dict(request.query_params)
+
+    message_sid = data.get("MessageSid")
+    message_status = data.get("MessageStatus")
+    to_number = data.get("To")
+    from_number = data.get("From")
+
+    # يمكنك لاحقاً حفظ الحالة في قاعدة بيانات أو عمل Logging
+    print(f"Message {message_sid} | To: {to_number} | From: {from_number} | Status: {message_status}")
+
+    return {"status": "received"}
+
+
 # ===== Route اختبار =====
 @app.get("/")
 def home():
@@ -102,9 +118,7 @@ def home():
 # ===== دالة التشغيل MAIN =====
 def main():
     import uvicorn
-
     port = int(os.environ.get("PORT", 8000))
-
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
